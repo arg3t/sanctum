@@ -1,0 +1,15 @@
+.Module.symvers.cmd
+.modules.order.cmd
+.sanctum.ko.cmd
+.sanctum.mod.cmd
+.sanctum.mod.o.cmd
+.sanctum.o.cmd
+Module.symvers
+modules.order
+sanctum.ko
+sanctum.mod
+sanctum.mod.c
+sanctum.mod.o
+sanctum.o
+compile_commands.json
+.cache
