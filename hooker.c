@@ -77,7 +77,7 @@ int hook_syscall(unsigned int nr, sys_call_ptr_t f) {
     return -3;
 
   if(!sys_call_table)
-    if (!(sys_call_table = (sys_call_ptr_t*) locate_symbol_brute("sys_call_table")))
+    if (!(sys_call_table = (sys_call_ptr_t *) locate_symbol_brute("sys_call_table")))
       return -2;
 
   // Do not overwrite once original address is known!
@@ -136,7 +136,9 @@ sys_call_ptr_t get_original_syscall(unsigned int nr) {
     if (!(sys_call_table = (sys_call_ptr_t*) locate_symbol_brute("sys_call_table")))
       return 0;
 
-  SYSCALL_ADDRESSES[nr] = sys_call_table[nr];
+  if(!SYSCALL_ADDRESSES[nr])
+    SYSCALL_ADDRESSES[nr] = sys_call_table[nr];
+
   return SYSCALL_ADDRESSES[nr];
 }
 
