@@ -17,6 +17,7 @@
   typedef struct Sanctum {
     struct path path;
     char key[SANCTUM_KEY_SIZE];
+    size_t keylen;
     pid_t owner;
 
     // These fields are for the linked list

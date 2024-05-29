@@ -44,6 +44,7 @@ sanctum_t *init_sanctum(struct path* path, pid_t owner) {
   convert_to_readable(sanctum->key, SANCTUM_KEY_SIZE);
 
   sanctum->owner = owner;
+  sanctum->keylen = SANCTUM_KEY_SIZE;
   memcpy(&sanctum->path, path, sizeof(struct path));
 
   return sanctum;
@@ -54,7 +55,7 @@ int8_t add_sanctum(sanctum_t* head, sanctum_t* new) {
   sanctum_t* node = head;
 
   while(node->next != head){
-    if (path_equal(&node->next->path, &new->path) == 0)
+    if (path_equal(&node->next->path, &new->path))
       return SEXIST;
 
     node = node->next;
