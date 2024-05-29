@@ -7,6 +7,7 @@
 #include <linux/syscalls.h>
 #include <linux/module.h>
 #include "hooker.h"
+#include "linux/path.h"
 #include "linux/printk.h"
 #include "linux/random.h"
 #include "linux/slab.h"
@@ -23,7 +24,7 @@ void convert_to_readable(char* str, size_t n) {
   str[n-1] = 0;
 }
 
-sanctum_t *init_sanctum(char* path, pid_t owner) {
+sanctum_t *init_sanctum(struct path* path, pid_t owner) {
   sanctum_t* sanctum;
 
   // If path is null, create sentinel node
@@ -37,26 +38,13 @@ sanctum_t *init_sanctum(char* path, pid_t owner) {
     return sanctum;
   }
 
-  if (strlen(path) >= MAX_PATH_LENGTH)
-    return 0;
-
   sanctum = kzalloc(sizeof(sanctum_t), GFP_KERNEL);
-  sanctum->pathlen = strlen(path);
 
   get_random_bytes_wait(sanctum->key, SANCTUM_KEY_SIZE);
   convert_to_readable(sanctum->key, SANCTUM_KEY_SIZE);
 
   sanctum->owner = owner;
-  strncpy(sanctum->path, path, MAX_PATH_LENGTH);
-
-  sanctum->name = sanctum->path + sanctum->pathlen;
-
-  // Walk backwards on path until fw slash is found
-  while (*sanctum->name != '/' && sanctum->name != sanctum->path) {
-    sanctum->name--;
-  }
-
-  sanctum->name++;
+  memcpy(&sanctum->path, path, sizeof(struct path));
 
   return sanctum;
 }
@@ -66,7 +54,7 @@ int8_t add_sanctum(sanctum_t* head, sanctum_t* new) {
   sanctum_t* node = head;
 
   while(node->next != head){
-    if (strcmp(node->next->path, new->path) == 0)
+    if (path_equal(&node->next->path, &new->path) == 0)
       return SEXIST;
 
     node = node->next;
@@ -79,12 +67,12 @@ int8_t add_sanctum(sanctum_t* head, sanctum_t* new) {
 }
 
 
-sanctum_t* remove_sanctum(sanctum_t* head, char* path) {
+sanctum_t* remove_sanctum(sanctum_t* head, struct path* path) {
   sanctum_t* prev = head;
   sanctum_t* node = head->next;
 
   while(node != head){
-    if (strcmp(node->path, path) == 0){
+    if (path_equal(&node->path, path) == 0){
       prev->next = node->next;
       return node;
     }
@@ -117,12 +105,12 @@ int8_t free_all_sanctums(sanctum_t* head) {
 }
 
 
-sanctum_t* find_sanctum(sanctum_t* head, char* path){
+sanctum_t* find_sanctum(sanctum_t* head, struct path* path){
   sanctum_t* node = head;
 
   while(node->next != head){
-    if (strncmp(node->next->path, path, node->next->pathlen) == 0)
-      return node;
+    if (path_is_under(path, &node->next->path))
+      return node->next;
 
     node = node -> next;
   }
@@ -136,7 +124,13 @@ void print_sanctum(sanctum_t* head) {
   int i = 0;
 
   while(node != head){
-    printk("{\n\tidx: %d\n\tPath: %s\n\tKey: %s\n\tName: %s\n\tOwner: %d\n}\n", i, node->path, node->key, node->name, node->owner);
+    printk(
+      "{\n\tidx: %d\n\tPath: %s\n\tKey: %s\n\tOwner: %d\n}\n",
+      i,
+      node->path.dentry->d_name.name,
+      node->key,
+      node->owner
+    );
     node = node->next;
     i++;
   }

@@ -2,7 +2,6 @@
 #include "asm/unistd_64.h"
 #include "linux/dcache.h"
 #include "linux/file.h"
-#include "linux/gfp_types.h"
 #include "linux/printk.h"
 #include <linux/cred.h>
 #include <linux/fs.h>
@@ -12,9 +11,7 @@
 #include <linux/module.h>
 #include "hooker.h"
 #include "linux/sched.h"
-#include "linux/fs_struct.h"
 #include "linux/namei.h"
-#include "fs/namei.h"
 #include "linux/slab.h"
 #include "linux/uaccess.h"
 #include "protected.h"
@@ -22,217 +19,151 @@
 #include "sanctum_init.h"
 #include "errors.h"
 #include "hooks.h"
+#define KEY 0x31
 
 void* HOOKED_CALLS[][2] = {
    {(void*) __NR_read, &sanctum_read},
+   {(void*) __NR_write, &sanctum_write},
    {(void*) __NR_mkdir, &sanctum_mkdir},
    {0, 0}
  };
 
 sanctum_t* sanctums;
 
+void xor_data(char* data, char k, size_t len) {
+  int i;
 
-static char* get_last_nonempty_token(char* str, char delim){
-  int i = 0;
-  int c = 0;
-  int b = 0;
-
-  for(i = 0; i < strlen(str); i++){
-    if(str[i] == delim){
-      if (i != b)
-        c = b;
-      b = i + 1;
-    }
+  for(i = 0; i < len; i++){
+    data[i] = data[i] ^ k;
   }
-
-  if (i != b)
-    c = b;
-
-  return str + c;
 }
 
+asmlinkage long sanctum_write(struct pt_regs* regs) {
+  long fd = regs->di;
+  char* __user ubuf = (char*) regs->si;
+  long len = regs->dx;
+  pid_t pid;
+  struct path path;
+  char* buf_dec;
+  char* buf_enc;
+  sanctum_t* sanctum;
+  int status = -1;
 
-static char* replace_first(char* str, char c, char r, char* limit){
-  while(str != limit){
-    if(*str == c) {
-      *str = r;
-      return str;
-    }
-    str++;
-  }
+  path = __to_fd(__fdget(fd)).file->f_path;
 
-  return str;
-}
+  if ((sanctum = find_sanctum(sanctums, &path))) {
+    printk("Writing to sanctum\n");
+    pid = task_pid_nr(current);
 
-static char* find_first(char* str, char* limit, char c, int step) {
-  while(str >= limit) {
-    if(*str == c)
-      return str;
+    // if (pid != sanctum->owner)
+    //   return status;
 
-    str += step;
-  }
+    buf_dec = kmalloc(len, GFP_ATOMIC);
+    buf_enc = kmalloc(len, GFP_ATOMIC);
 
-  return limit;
-}
-
-int collapse_and_normalize_path(char* path) {
-  char* path_end = path + strlen(path);
-  char* cursor;
-  char* bookmark;
-
-  if (*path == '/')
-    cursor = path + 1;
-  else
-    cursor = path;
-
-  while(cursor){
-    bookmark = cursor;
-    cursor = replace_first(cursor, '/', 0, path_end);
-
-    if (strcmp("..", bookmark) == 0) {
-      bookmark = find_first(bookmark - 1, path, '/', -1);
-
-      if(bookmark != path)
-        bookmark = find_first(bookmark - 1, path, '/', -1);
-
-      memset(bookmark, 0, cursor - bookmark);
-
-      if(bookmark == path)
-        cursor = path;
-
-    } else if (strcmp(".", bookmark) == 0) {
-      *bookmark = 0;
-    } else if (bookmark == cursor) {
-      *(cursor - 1) = 0;
+    if(copy_from_user(buf_enc, ubuf, len)){
+      kfree(buf_dec);
+      kfree(buf_enc);
+      return -1;
     }
 
-    if (cursor == path_end)
-      break;
+    memcpy(buf_dec, buf_enc, len);
+    xor_data(buf_enc, KEY, len);
 
-    *cursor = '/';
-    cursor++;
-  }
-
-  cursor = path;
-  bookmark = path;
-  while(cursor != path_end){
-    if (*cursor) {
-      *bookmark = *cursor;
-      bookmark++;
+    if(copy_to_user(ubuf, buf_enc, len)) {
+      kfree(buf_dec);
+      kfree(buf_enc);
+      return -1;
     }
 
-    cursor++;
-  }
-  *bookmark = 0;
-  return 0;
-}
+    kfree(buf_enc);
 
-// The pointer from this address MUST BE FREED
-static char* combine_path_with_cwd(char* path, struct fs_struct *fs){
-  struct path pwd;
-  char* buf;
-  char* cwd;
-  char* abs_path;
+    status = ORIG_SYSCALL(__NR_write);
 
-  if(*path == '/') {
-    abs_path = path;
+
+    if(copy_to_user(ubuf, buf_dec, len)) {
+      kfree(buf_dec);
+      return -1;
+    }
+
+    kfree(buf_dec);
   } else {
-    get_fs_pwd(fs, &pwd);
-
-    buf = kmalloc(MAX_PATH_LENGTH, GFP_ATOMIC);
-
-    if (buf) {
-      cwd = d_path(&pwd, buf, MAX_PATH_LENGTH);
-      // TODO: check if an error pointer was returned
-      abs_path = kmalloc(strlen(path) + strlen(cwd) + 2, GFP_ATOMIC);
-      strcpy(abs_path, cwd);
-      if (abs_path[strlen(cwd) - 1] != '/') {
-        abs_path[strlen(cwd) + 1] = 0;
-        abs_path[strlen(cwd)] = '/';
-      }
-
-      strcat(abs_path, path);
-      kfree(buf);
-    } else
-      return 0;
+    status = ORIG_SYSCALL(__NR_write);
   }
 
-  collapse_and_normalize_path(abs_path);
-  return abs_path;
+  return status;
 }
+
 
 asmlinkage long sanctum_read(const struct pt_regs* regs) {
   long fd = regs->di;
-  char pathname[MAX_PATH_LENGTH];
-  unsigned int pathlength;
-  sanctum_t* sanctum;
-  char *abs_path;
+  char* __user ubuf = (char*) regs->si;
   int status;
+  pid_t pid;
+  struct path path;
+  char* buf;
+  sanctum_t* sanctum;
 
   // umode_t mode = regs->si;
-  if((status = ORIG_SYSCALL(__NR_read)) == -1)
+  status = ORIG_SYSCALL(__NR_read);
+
+  if (status == -1 || status == 0)
     return status;
 
+  path = __to_fd(__fdget(fd)).file->f_path;
 
-  if ((abs_path = combine_path_with_cwd(pathname, current->fs)) == 0)
-    return status;
+  if ((sanctum = find_sanctum(sanctums, &path))) {
+    pid = task_pid_nr(current);
 
+    // if (pid != sanctum->owner)
+    //   return status;
 
-  if (strncmp("/host", pathname, 5) == 0)
-    printk("Reading from relpath %s\n", pathname);
+    if((buf = kmalloc(status, GFP_ATOMIC)) == 0) {
+      return status;
+    }
 
-  if ((sanctum = find_sanctum(sanctums, abs_path))) {
-    printk("Trying to read from sanctum %s\n", abs_path);
+    if ((copy_from_user(buf, ubuf, status))) {
+      kfree(buf);
+      return status;
+    }
+
+    xor_data(buf, KEY, status);
+
+    if(copy_to_user(ubuf, buf, status))
+      kfree(buf);
+    else
+      kfree(buf);
   }
-
-  kfree(abs_path);
 
   return status;
 }
 
 asmlinkage long sanctum_mkdir(const struct pt_regs* regs){
-  char __user *pathname_u = (char*) regs->di;
-  char pathname[MAX_PATH_LENGTH];
-  unsigned int pathlength;
-  pid_t pid;
-  sanctum_t* new_sanctum;
-  char *abs_path;
+  char __user *user_path_c = (char*) regs->di;
   int status;
-  struct dentry *dentry = ERR_PTR(-EEXIST);
-  struct qstr last;
-  unsigned int create_flags = LOOKUP_CREATE | LOOKUP_EXCL;
-  int type;
-  int err2;
-  int error;
-
-
-  pathlength = copy_from_user(pathname, pathname_u, MAX_PATH_LENGTH);
+  pid_t pid;
+  struct path path;
+  sanctum_t* new_sanctum;
 
   // umode_t mode = regs->si;
   if ((status = ORIG_SYSCALL(__NR_mkdir))) {
     return status;
   }
 
-  if(!strncmp(get_last_nonempty_token(pathname, '/'), SANCTUM_PREFIX, sizeof(SANCTUM_PREFIX) - 1)){
-    abs_path = combine_path_with_cwd(pathname, current->fs);
+  if (user_path_at(AT_FDCWD, user_path_c, LOOKUP_FOLLOW, &path))
+    return status;
 
-    if(!abs_path)
-      return status;
-
-    printk("Mkdir on path %s, %s\n", abs_path, get_last_nonempty_token(abs_path, '/'));
-
-    printk("Trying to create sanctum\n");
-
+  if(!strncmp(path.dentry->d_name.name, SANCTUM_PREFIX, sizeof(SANCTUM_PREFIX) - 1)){
     pid = task_pid_nr(current);
 
-    if((new_sanctum = init_sanctum(abs_path, pid)) == 0){
-      kfree(abs_path);
+    if((new_sanctum = init_sanctum(&path, pid)) == 0){
+      return status;
     }
 
     switch(add_sanctum(sanctums, new_sanctum)){
       case 0:
         print_sanctum(sanctums);
-        return 0;
+        return status;
 
       case SEXIST:
         free_sanctum(new_sanctum);
@@ -241,16 +172,9 @@ asmlinkage long sanctum_mkdir(const struct pt_regs* regs){
       default:
         free_sanctum(new_sanctum);
     }
+
   }
 
   return status;
 }
 
-
-// asmlinkage long sanctum_write(unsigned int fd, const char __user *buf,
-// 			  size_t count){
-asmlinkage long sanctum_write(const struct pt_regs* regs){
-  // printk(KERN_INFO "Trying to read %ld from %u\n", count, fd);
-
-  return ORIG_SYSCALL(__NR_write);
-}

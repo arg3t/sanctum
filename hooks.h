@@ -13,7 +13,7 @@
 
   asmlinkage long sanctum_mkdir(const struct pt_regs* regs);
 
-  asmlinkage long sanctum_write(const struct pt_regs*);
+  asmlinkage long sanctum_write(struct pt_regs*);
 
   // Global linked list containing sanctums
   extern sanctum_t* sanctums;
