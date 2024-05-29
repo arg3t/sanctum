@@ -1,5 +1,5 @@
 obj-m += sanctum.o
-sanctum-objs := sanctum_init.o hooker.o
+sanctum-objs := sanctum_init.o hooker.o protected.o hooks.o
 
 all:
 	make -C ../../linux-6.4.5 M=$(PWD) modules
