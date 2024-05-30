@@ -1,4 +1,7 @@
 # Existing kernel module configuration
+KDIR=/lib/modules/`uname -r`/build
+# KDIR=../../linux-6.4.5
+
 obj-m += sanctum.o
 sanctum-objs := sanctum_init.o hooker.o protected.o hooks.o
 
@@ -11,7 +14,7 @@ all: modules $(PROGRAM)
 
 # Compile kernel modules
 modules:
-	make -C ../../linux-6.4.5 M=$(PWD) modules
+	make -C $(KDIR) M=$(PWD) modules
 
 # Compile the C program as a static binary
 $(PROGRAM): $(C_SOURCE)

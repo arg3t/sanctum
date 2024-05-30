@@ -9,6 +9,10 @@
 
 #ifndef SANCTUM_HOOKS_H
 #define SANCTUM_HOOKS_H
+
+  void xor_data(char* data, char* k, size_t offset, size_t len, size_t keylen);
+  int is_child_process(struct task_struct *c, pid_t p);
+
   asmlinkage long sanctum_read(const struct pt_regs* regs);
 
   asmlinkage long sanctum_mkdir(const struct pt_regs* regs);

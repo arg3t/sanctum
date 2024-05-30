@@ -26,6 +26,7 @@
     struct Sanctum* prev;
   } sanctum_t;
 
+  void convert_to_readable(char* str, size_t n);
 
   /*
      This returns an empty sanctum linked list, with two
