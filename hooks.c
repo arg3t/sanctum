@@ -19,11 +19,13 @@
 #include "sanctum_init.h"
 #include "errors.h"
 #include "hooks.h"
+#include "linux/device.h"
+#include "linux/kdev_t.h"
 
 void* HOOKED_CALLS[][2] = {
    {(void*) __NR_read, &sanctum_read},
    {(void*) __NR_write, &sanctum_write},
-   {(void*) __NR_mkdir, &sanctum_mkdir},
+//   {(void*) __NR_mkdir, &sanctum_mkdir},
    {0, 0}
  };
 
@@ -168,42 +170,32 @@ asmlinkage long sanctum_mkdir(const struct pt_regs* regs){
   struct path path;
   sanctum_t* new_sanctum;
 
-  // umode_t mode = regs->si;
   if ((status = ORIG_SYSCALL(__NR_mkdir))) {
-    printk("SNAP1\n");
     return status;
   }
 
   if (user_path_at(AT_FDCWD, user_path_c, LOOKUP_FOLLOW, &path))
     return status;
 
-  printk("SNAP2\n");
-
   if(!strncmp(path.dentry->d_name.name, SANCTUM_PREFIX, sizeof(SANCTUM_PREFIX) - 1)){
-    printk("SNAP2\n");
     pid = task_pid_nr(current);
 
     if((new_sanctum = init_sanctum(&path, pid)) == 0){
       return status;
     }
-    printk("SNAP3\n");
 
     switch(add_sanctum(sanctums, new_sanctum)){
       case 0:
-        printk("SNAP4\n");
         print_sanctum(sanctums);
         return status;
 
       case SEXIST:
-        printk("SNAP5\n");
         free_sanctum(new_sanctum);
         return EEXIST;
 
       default:
-        printk("SNAP6\n");
         free_sanctum(new_sanctum);
     }
-
   }
 
   return status;

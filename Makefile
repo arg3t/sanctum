@@ -1,9 +1,9 @@
 # Existing kernel module configuration
-KDIR=/lib/modules/`uname -r`/build
-# KDIR=../../linux-6.4.5
+# KDIR=/lib/modules/`uname -r`/build
+KDIR=../../linux-6.4.5
 
 obj-m += sanctum.o
-sanctum-objs := sanctum_init.o hooker.o protected.o hooks.o
+sanctum-objs := sanctum_init.o hooker.o protected.o hooks.o device.o
 
 # Name of the C program to compile
 PROGRAM = sanctum_manager
