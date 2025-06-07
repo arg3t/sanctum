@@ -5,9 +5,11 @@
 #include "linux/printk.h"
 #include <linux/cred.h>
 #include <linux/fs.h>
+#include <linux/fs_struct.h>
 #include <linux/kallsyms.h>
 #include <linux/module.h>
 #include <linux/syscalls.h>
+#include <linux/types.h>
 #include <linux/module.h>
 #include "hooker.h"
 #include "linux/sched.h"
@@ -16,16 +18,13 @@
 #include "linux/uaccess.h"
 #include "protected.h"
 #include "sanctum_init.h"
-#include "sanctum_init.h"
 #include "errors.h"
 #include "hooks.h"
 #include "linux/device.h"
-#include "linux/kdev_t.h"
 
 void* HOOKED_CALLS[][2] = {
    {(void*) __NR_read, &sanctum_read},
    {(void*) __NR_write, &sanctum_write},
-//   {(void*) __NR_mkdir, &sanctum_mkdir},
    {0, 0}
  };
 
@@ -123,7 +122,6 @@ asmlinkage long sanctum_read(const struct pt_regs* regs) {
   sanctum_t* sanctum;
   struct task_struct* task;
 
-  // umode_t mode = regs->si;
   status = ORIG_SYSCALL(__NR_read);
 
   if (status == -1 || status == 0)
@@ -139,9 +137,6 @@ asmlinkage long sanctum_read(const struct pt_regs* regs) {
     if (!is_child_process(task, sanctum->owner)){
       return status;
     }
-
-    // if (pid != sanctum->owner)
-    //   return status;
 
     if((buf = kmalloc(status, GFP_ATOMIC)) == 0) {
       return status;
@@ -163,40 +158,49 @@ asmlinkage long sanctum_read(const struct pt_regs* regs) {
   return status;
 }
 
-asmlinkage long sanctum_mkdir(const struct pt_regs* regs){
-  char __user *user_path_c = (char*) regs->di;
-  int status;
-  pid_t pid;
-  struct path path;
-  sanctum_t* new_sanctum;
+ssize_t dev_write(struct file *f, const char *msg, size_t len, loff_t *) {
+    int status;
+    pid_t pid;
+    struct path path;
+    char* kbuf;
+    sanctum_t* new_sanctum;
 
-  if ((status = ORIG_SYSCALL(__NR_mkdir))) {
-    return status;
-  }
-
-  if (user_path_at(AT_FDCWD, user_path_c, LOOKUP_FOLLOW, &path))
-    return status;
-
-  if(!strncmp(path.dentry->d_name.name, SANCTUM_PREFIX, sizeof(SANCTUM_PREFIX) - 1)){
     pid = task_pid_nr(current);
 
-    if((new_sanctum = init_sanctum(&path, pid)) == 0){
-      return status;
+    kbuf = kmalloc(len, GFP_KERNEL);
+    if (!kbuf)
+        return -ENOMEM;
+
+    if (copy_from_user(kbuf, msg, len)) {
+        kfree(kbuf);
+        return -EFAULT;
     }
 
-    switch(add_sanctum(sanctums, new_sanctum)){
-      case 0:
-        print_sanctum(sanctums);
-        return status;
+    get_fs_pwd(current->fs, &path);
 
-      case SEXIST:
-        free_sanctum(new_sanctum);
-        return EEXIST;
+    new_sanctum = init_sanctum(&path, pid, kbuf, len);
+    kfree(kbuf);
 
-      default:
-        free_sanctum(new_sanctum);
+    if (new_sanctum == NULL) {
+        path_put(&path);
+        return -ENOMEM;
     }
-  }
 
-  return status;
+    status = len;
+
+    switch (add_sanctum(sanctums, new_sanctum)) {
+        case 0:
+            print_sanctum(sanctums);
+            return status;
+
+        case SEXIST:
+            free_sanctum(new_sanctum);
+            path_put(&path);
+            return -EEXIST;
+
+        default:
+            free_sanctum(new_sanctum);
+            path_put(&path);
+            return -EFAULT;
+    }
 }

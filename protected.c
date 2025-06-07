@@ -14,16 +14,7 @@
 #include <linux/module.h>
 #include <linux/syscalls.h>
 
-void convert_to_readable(char *str, size_t n) {
-  for (int i = 0; i < n - 1; i++) {
-    while (str[i] < 0x21 || str[i] > 0x7E) {
-      str[i] = get_random_u8();
-    }
-  }
-  str[n - 1] = 0;
-}
-
-sanctum_t *init_sanctum(struct path *path, pid_t owner) {
+sanctum_t *init_sanctum(struct path *path, pid_t owner, char* pass, int passlen) {
   sanctum_t *sanctum;
 
   // If path is null, create sentinel node
@@ -39,11 +30,14 @@ sanctum_t *init_sanctum(struct path *path, pid_t owner) {
 
   sanctum = kzalloc(sizeof(sanctum_t), GFP_KERNEL);
 
-  get_random_bytes_wait(sanctum->key, SANCTUM_MAX_KEY_SIZE);
-  convert_to_readable(sanctum->key, SANCTUM_MAX_KEY_SIZE);
+  if(SANCTUM_MAX_KEY_SIZE > passlen){
+    sanctum->keylen = passlen;
+  }else {
+    sanctum->keylen = SANCTUM_MAX_KEY_SIZE;
+  }
+  memcpy(sanctum->key, pass, sanctum->keylen);
 
   sanctum->owner = owner;
-  sanctum->keylen = SANCTUM_MAX_KEY_SIZE;
   memcpy(&sanctum->path, path, sizeof(struct path));
 
   return sanctum;
@@ -118,7 +112,7 @@ void print_sanctum(sanctum_t *head) {
   int i = 0;
 
   while (node != head) {
-    printk("{\n\tidx: %d\n\tPath: %s\n\tKey: %s\n\tOwner: %d\n}\n", i,
+    printk(KERN_INFO "{\n\tidx: %d\n\tPath: %s\n\tKey: %s\n\tOwner: %d\n}\n", i,
            node->path.dentry->d_name.name, node->key, node->owner);
     node = node->next;
     i++;

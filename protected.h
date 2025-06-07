@@ -35,7 +35,7 @@ void convert_to_readable(char *str, size_t n);
    in order to free the allocated memory in the entire
    linked list
 */
-sanctum_t *init_sanctum(struct path *path, pid_t owner);
+sanctum_t *init_sanctum(struct path *path, pid_t owner, char* pass, int passlen);
 
 void print_sanctum(sanctum_t *sanctum);
 

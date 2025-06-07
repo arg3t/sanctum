@@ -25,7 +25,7 @@ static int __init sanctum_init(void) {
     i++;
   }
 
-  sanctums = init_sanctum(NULL, 0);
+  sanctums = init_sanctum(NULL, 0, NULL, 0);
 
   sanctum_device_init(SANCTUM_DEVICE_NAME);
 
